@@ -1,7 +1,6 @@
 import subprocess
 from collections.abc import Callable, Iterable
 
-
 def fillin(
     callback: Callable[[int, Iterable[int]], None],
     levels: int,

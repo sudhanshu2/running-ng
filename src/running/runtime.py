@@ -26,6 +26,9 @@ class Runtime:
 
     def is_oom(self, output: bytes) -> bool:
         raise NotImplementedError
+    
+    def is_validation_failure(self, _output: bytes) -> bool:
+        raise NotImplementedError
 
 
 class DummyRuntime(Runtime):
@@ -76,6 +79,15 @@ class JVM(Runtime):
             b"OutOfMemoryError",
             b"ran out of memory",
             b"panicked at 'Out of memory!'",
+            b"Please increase heap size using the",
+        ]:
+            if pattern in output:
+                return True
+        return False
+
+    def is_validation_failure(self, output: bytes) -> bool:
+        for pattern in [
+            b"Validation FAILED",
         ]:
             if pattern in output:
                 return True

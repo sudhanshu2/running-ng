@@ -41,6 +41,7 @@ minheap_multiplier: float
 remote_host: str | None
 skip_oom: int | None
 skip_timeout: int | None
+skip_error: int | None
 skip_log_compression: bool = False
 skip_env_dump: bool = False
 randomize_configs: bool = False
@@ -62,6 +63,7 @@ def setup_parser(subparsers):
     f.add_argument("-m", "--minheap-multiplier", type=float)
     f.add_argument("--skip-oom", type=int)
     f.add_argument("--skip-timeout", type=int)
+    f.add_argument("--skip-error", type=int)
     f.add_argument("--resume", type=str)
     f.add_argument("--workdir", type=Path)
     f.add_argument(
@@ -157,7 +159,7 @@ def get_hfacs(
 
 
 def run_benchmark_with_config(
-    c: str, b: Benchmark, runbms_dir: Path, size: int | None, fd: BinaryIO | None
+    c: str, b: Benchmark, runbms_dir: Path, size: int | None, fd: BinaryIO | None, invocation: int
 ) -> tuple[bytes, SubprocessrExit]:
     runtime, mods = parse_config_str(configuration, c)
     mod_b = b.attach_modifiers(mods)
@@ -167,7 +169,7 @@ def run_benchmark_with_config(
     if fd:
         prologue = get_log_prologue(runtime, mod_b)
         fd.write(prologue.encode("ascii"))
-    output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir)
+    output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir, invocation=invocation, heap_size=size)
     if fd:
         fd.write(output)
         if companion_out:
@@ -257,6 +259,7 @@ def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
 
 
 def run_one_benchmark(
+    max_attempts: int,
     invocations: int,
     suite: BenchmarkSuite,
     bm: Benchmark,
@@ -281,6 +284,10 @@ def run_one_benchmark(
     oomed_count = defaultdict(int)
     timeout_count: defaultdict[str, int]
     timeout_count = defaultdict(int)
+    error_count: defaultdict[str, int]
+    error_count = defaultdict(int)
+    pass_count: defaultdict[str, int]
+    pass_count = defaultdict(int)
     logged_in_users: set[str]
     logged_in_users = get_logged_in_users()
     if len(logged_in_users) > 1:
@@ -298,10 +305,10 @@ def run_one_benchmark(
             f" using {cpu_percent:.1f}% CPU"
         )
     ever_ran = [False] * len(configs)
-    for i in range(0, invocations):
+    for invocation in range(0, max_attempts):
         for p in plugins.values():
-            p.start_invocation(hfac, size, bm, i)
-        print(i, end="", flush=True)
+            p.start_invocation(hfac, size, bm, invocation)
+        print(invocation, end="", flush=True)
 
         # Create order for configs - randomized if flag is set, otherwise sequential
         config_indices = list(range(len(configs)))
@@ -312,13 +319,21 @@ def run_one_benchmark(
             c = configs[j]
             config_passed = False
             for p in plugins.values():
-                p.start_config(hfac, size, bm, i, c, j)
+                p.start_config(hfac, size, bm, invocation, c, j)
+            if pass_count[c] == invocations:
+                print(".", end="", flush=True)
+                continue
             if skip_oom is not None and oomed_count[c] >= skip_oom:
                 print(".", end="", flush=True)
                 if exit_on_failure_code is not None:
                     sys.exit(exit_on_failure_code)
                 continue
             if skip_timeout is not None and timeout_count[c] >= skip_timeout:
+                print(".", end="", flush=True)
+                if exit_on_failure_code is not None:
+                    sys.exit(exit_on_failure_code)
+                continue
+            if skip_error is not None and error_count[c] >= skip_error:
                 print(".", end="", flush=True)
                 if exit_on_failure_code is not None:
                     sys.exit(exit_on_failure_code)
@@ -333,44 +348,59 @@ def run_one_benchmark(
             runtime, _ = parse_config_str(configuration, c)
             if is_dry_run():
                 output, exit_status = run_benchmark_with_config(
-                    c, bm, runbms_dir, size, None
+                    c, bm, runbms_dir, size, None, invocation
                 )
                 assert exit_status is SubprocessrExit.Dryrun
             else:
                 fd: BinaryIO
                 with (log_dir / log_filename).open("ab") as fd:
                     output, exit_status = run_benchmark_with_config(
-                        c, bm, runbms_dir, size, fd
+                        c, bm, runbms_dir, size, fd, invocation
                     )
                 ever_ran[j] = True
+            # an execution can have multiple errors or state outputs
+            execution_output = list()
+            errored = False
             if runtime.is_oom(output):
+                errored = True
                 oomed_count[c] += 1
+                execution_output.append("oom")
+            if runtime.is_validation_failure(output):
+                errored = True
+                execution_output.append("validation failed")
             if exit_status is SubprocessrExit.Timeout:
+                errored = True
                 timeout_count[c] += 1
-                print(".", end="", flush=True)
+                error_count[c] += 1
+                execution_output.append("timeout")
                 if exit_on_failure_code is not None:
                     sys.exit(exit_on_failure_code)
-            elif exit_status is SubprocessrExit.Error:
+            elif exit_status is SubprocessrExit.Error or errored:
+                errored = True
+                error_count[c] += 1
+                execution_output.append("error")
                 print(".", end="", flush=True)
                 if exit_on_failure_code is not None:
                     sys.exit(exit_on_failure_code)
             elif exit_status is SubprocessrExit.Normal:
                 if suite.is_passed(output):
                     config_passed = True
-                    print(config_index_to_chr(j), end="", flush=True)
+                    pass_count[c] += 1
+                    execution_output.append(f"passed -> {config_index_to_chr(j)}")
                 else:
-                    print(".", end="", flush=True)
+                    execution_output.append("failed")
                     if exit_on_failure_code is not None:
                         sys.exit(exit_on_failure_code)
             elif exit_status is SubprocessrExit.Dryrun:
-                print(".", end="", flush=True)
+                execution_output.append(".")
             else:
                 raise ValueError("Not a valid SubprocessrExit value")
+            print(f"[{','.join(execution_output)}]", end="", flush=True)
             for p in plugins.values():
-                p.end_config(hfac, size, bm, i, c, j, config_passed)
+                p.end_config(hfac, size, bm, invocation, c, j, config_passed)
 
         for p in plugins.values():
-            p.end_invocation(hfac, size, bm, i)
+            p.end_invocation(hfac, size, bm, invocation)
     for p in plugins.values():
         p.end_benchmark(hfac, size, bm)
     for j, c in enumerate(configs):
@@ -384,6 +414,7 @@ def run_one_benchmark(
 
 
 def run_one_hfac(
+    max_attempts: int,
     invocations: int,
     hfac: float | None,
     suites: dict[str, BenchmarkSuite],
@@ -399,7 +430,7 @@ def run_one_hfac(
         suite = suites[suite_name]
         for bm in bms:
             run_one_benchmark(
-                invocations, suite, bm, hfac, configs, runbms_dir, log_dir
+                max_attempts, invocations, suite, bm, hfac, configs, runbms_dir, log_dir
             )
             rsync(log_dir)
     for p in plugins.values():
@@ -450,6 +481,8 @@ def run(args):
         skip_oom = args.get("skip_oom")
         global skip_timeout
         skip_timeout = args.get("skip_timeout")
+        global skip_error
+        skip_error = args.get("skip_error")
         global skip_log_compression
         skip_log_compression = args.get("skip_log_compression")
         global skip_env_dump
@@ -471,6 +504,11 @@ def run(args):
         invocations = configuration.get("invocations")
         if args.get("invocations"):
             invocations = args.get("invocations")
+        max_attempts = configuration.get("max-attempts")
+        if args.get("max-attempts"):
+            max_attempts = args.get("max-attempts")
+        if max_attempts is None:
+            max_attempts = invocations
         global minheap_multiplier
         minheap_multiplier = configuration.get("minheap_multiplier")
         if args.get("minheap_multiplier"):
@@ -512,6 +550,7 @@ def run(args):
         if not slice and N is None:
             # run all configs without specifying heap size
             run_one_hfac(
+                max_attempts,
                 invocations,
                 None,  # not specifying heap size
                 suites,
@@ -528,6 +567,7 @@ def run(args):
         if configs_no_heapsize:
             logging.info("Running all configs with NoImplicitHeapSizeModifier set")
             run_one_hfac(
+                max_attempts,
                 invocations,
                 None,  # not specifying heap size
                 suites,
@@ -544,6 +584,7 @@ def run(args):
             )
             for hfac in hfacs:
                 run_one_hfac(
+                    max_attempts,
                     invocations,
                     hfac,
                     suites,

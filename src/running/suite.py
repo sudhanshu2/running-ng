@@ -155,6 +155,18 @@ class DaCapo(JavaBenchmarkSuite):
         # user overriding the default size for the entire suite
         self.size: str | None
         self.size = kwargs.get("size")
+        self.prepend: str | None
+        self.prepend = kwargs.get("prepend")
+        self.monitors: list[str] | None
+        self.monitors = kwargs.get("monitors")
+        self.execution_dump: str | None
+        self.execution_dump = kwargs.get("execution_dump")
+        self.delay_execution: float | None
+        self.delay_execution = kwargs.get("delay_execution")
+        if self.delay_execution is not None:
+            self.delay_execution = float(self.delay_execution)
+        self.scratch_directory: str | None
+        self.scratch_directory = kwargs.get("scratch_directory")
 
     def __str__(self) -> str:
         return f"{super().__str__()} DaCapo {self.release} {self.path}"
@@ -176,6 +188,7 @@ class DaCapo(JavaBenchmarkSuite):
         timing_iteration = self.timing_iteration
         timeout = self.timeout
         size = self.size
+        scratch_directory = self.scratch_directory
         if type(bm_spec) is str:
             bm_name = bm_spec
             name = bm_spec
@@ -229,6 +242,10 @@ class DaCapo(JavaBenchmarkSuite):
             suite_name=self.name,
             name=name,
             timeout=timeout,
+            prepend=self.get_prepend(),
+            monitors=self.get_monitors(),
+            execution_dump=self.get_execution_dump(),
+            delay_execution=self.get_delay_execution(),
         )
 
     def get_minheap(self, bm: Benchmark) -> int:
@@ -275,6 +292,18 @@ class DaCapo(JavaBenchmarkSuite):
                 "or a dictionary (different companions for"
                 "differerent benchmarks)"
             )
+
+    def get_prepend(self) -> str | None:
+        return self.prepend
+
+    def get_monitors(self) -> list[str] | None:
+        return self.monitors
+
+    def get_execution_dump(self) -> str | None:
+        return self.execution_dump
+
+    def get_delay_execution(self) -> float | None:
+        return self.delay_execution
 
 
 @register(BenchmarkSuite)
