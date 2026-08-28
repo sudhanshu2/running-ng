@@ -379,7 +379,6 @@ def run_one_benchmark(
                 errored = True
                 error_count[c] += 1
                 execution_output.append("error")
-                print(".", end="", flush=True)
                 if exit_on_failure_code is not None:
                     sys.exit(exit_on_failure_code)
             elif exit_status is SubprocessrExit.Normal:
