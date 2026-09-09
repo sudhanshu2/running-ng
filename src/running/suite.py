@@ -157,8 +157,14 @@ class DaCapo(JavaBenchmarkSuite):
         self.size = kwargs.get("size")
         self.prepend: str | None
         self.prepend = kwargs.get("prepend")
+        self.skip_env: bool
+        self.skip_env = kwargs.get("skip_env")
+        if self.skip_env is None:
+          self.skip_env = False
         self.monitors: list[str] | None
         self.monitors = kwargs.get("monitors")
+        self.postexecution = list[str] | None
+        self.postexecution = kwargs.get("postexecution")
         self.execution_dump: str | None
         self.execution_dump = kwargs.get("execution_dump")
         self.delay_execution: float | None
@@ -246,6 +252,8 @@ class DaCapo(JavaBenchmarkSuite):
             monitors=self.get_monitors(),
             execution_dump=self.get_execution_dump(),
             delay_execution=self.get_delay_execution(),
+            skip_env=self.skip_env,
+            postexecution=self.postexecution
         )
 
     def get_minheap(self, bm: Benchmark) -> int:

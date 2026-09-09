@@ -57,6 +57,8 @@ class Benchmark:
         monitors: list[str] | None = None,
         execution_dump: str | None = None,
         delay_execution: float | None = None,
+        skip_env: bool| None = False,
+        postexecution: list[str] | None = None,
         **kwargs,
     ):
         self.name = name
@@ -80,6 +82,10 @@ class Benchmark:
         if monitors is not None:
             for monitor in monitors:
                 self.monitors.append(monitor.split())
+        self.postexecution = list()
+        if postexecution is not None:
+            for post_cmd in postexecution:
+              self.postexecution.append(post_cmd.split())
         if execution_dump is not None:
             self.execution_dump = execution_dump
         else:
@@ -89,6 +95,7 @@ class Benchmark:
         else:
             self.delay_execution = None
         self.timeout = timeout
+        self.skip_env = skip_env
         # ignore the current working directory provided by
         # commands like runbms or minheap
         # certain benchmarks expect to be invoked from certain directories
@@ -197,8 +204,8 @@ class Benchmark:
 
     def to_string(self, runtime: Runtime, invocation: int | None = None, heap_size: int | None = None) -> str:
         cmd = "{} {} {}".format(
-            self.get_env_str(),
             " ".join(self.prepend),
+            self.get_env_str(),
             " ".join(
                 [
                     smart_quote(os.path.expandvars(x))
@@ -223,14 +230,18 @@ class Benchmark:
                 sleep(self.delay_execution)
             cmd = self.get_full_args(runtime)
             cmd = [os.path.expandvars(x) for x in cmd]
+            env_args = os.environ.copy()
             env_args_to_add = {
                 k: os.path.expandvars(v) for k, v in self.env_args.items()
             }
-            cmd = self.prepend + cmd
+            if self.skip_env is True:
+              env_list = [f"{k}={os.path.expandvars(v)}" for (k, v) in env_args_to_add.items()]
+              cmd = self.prepend + env_list + cmd
+            else:
+              cmd = self.prepend + cmd
+              env_args.update(env_args_to_add)
+              env_args = self.replace_tokens(env_args, invocation=invocation, heap_size=heap_size)
             cmd = self.replace_tokens(cmd, invocation=invocation, heap_size=heap_size)
-            env_args = os.environ.copy()
-            env_args.update(env_args_to_add)
-            env_args = self.replace_tokens(env_args, invocation=invocation, heap_size=heap_size)
             companion_out = b""
             stdout: bytes | None
             if self.companion:
@@ -303,6 +314,16 @@ class Benchmark:
                 if self.execution_dump is not None:
                     execution_dump_file.write(f"EXCEPTION -> {e}\n")
             finally:
+                for post_cmd in self.postexecution:
+                  copy_post_cmd = deepcopy(post_cmd)
+                  copy_post_cmd = self.replace_tokens(copy_post_cmd, invocation=invocation, heap_size=heap_size, pid=p.pid)
+                  p = subprocess.run(
+                        copy_post_cmd,
+                        env=env_args,
+                        stdout=stdout_dump,
+                        stderr=stderr_dump,
+                        cwd=self.override_cwd if self.override_cwd else cwd,
+                    )
                 if self.execution_dump is not None:
                     curr_time = datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
                     execution_dump_file.flush()
