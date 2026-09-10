@@ -314,6 +314,8 @@ class Benchmark:
                 if self.execution_dump is not None:
                     execution_dump_file.write(f"EXCEPTION -> {e}\n")
             finally:
+                if execution_start_time is not None:
+                    execution_end_time = time()
                 for post_cmd in self.postexecution:
                   copy_post_cmd = deepcopy(post_cmd)
                   copy_post_cmd = self.replace_tokens(copy_post_cmd, invocation=invocation, heap_size=heap_size, pid=p.pid)
@@ -327,8 +329,7 @@ class Benchmark:
                 if self.execution_dump is not None:
                     curr_time = datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
                     execution_dump_file.flush()
-                    if execution_start_time is not None:
-                        execution_end_time = time()
+                    if execution_start_time is not None and execution_end_time is not None:
                         total_execution_time = execution_end_time - execution_start_time
                         execution_dump_file.write(
                             f"EXECUTION TIME (seconds) -> {total_execution_time:.2f}\n"
