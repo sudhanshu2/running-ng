@@ -318,10 +318,9 @@ class Benchmark:
                     execution_end_time = time()
                 for post_cmd in self.postexecution:
                   copy_post_cmd = deepcopy(post_cmd)
-                  copy_post_cmd = self.replace_tokens(copy_post_cmd, invocation=invocation, heap_size=heap_size, pid=p.pid)
+                  copy_post_cmd = self.replace_tokens(copy_post_cmd, invocation=invocation, heap_size=heap_size)
                   p = subprocess.run(
                         copy_post_cmd,
-                        env=env_args,
                         stdout=stdout_dump,
                         stderr=stderr_dump,
                         cwd=self.override_cwd if self.override_cwd else cwd,

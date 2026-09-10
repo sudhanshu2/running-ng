@@ -74,6 +74,7 @@ class JVM(Runtime):
         return [heapsize]
 
     def is_oom(self, output: bytes) -> bool:
+        output = output.replace(b"-XX:+ExitOnOutOfMemoryError", b"")
         for pattern in [
             b"Allocation Failed",
             b"OutOfMemoryError",
